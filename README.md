@@ -38,4 +38,4 @@ O projeto é leve e responsivo.
 ---
 
 ## Acesso
-Navegue até [o website do Colormind]("https://colormind.streamlit.app") para utilizar as utilidades.
+Navegue até [o website do Colormind](https://colormind-hbei.onrender.com/) para utilizar as utilidades.
