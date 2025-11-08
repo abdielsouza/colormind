@@ -1,10 +1,14 @@
 import streamlit as st
 import numpy as np
-import cv2
 import math
 from sklearn.cluster import KMeans, MiniBatchKMeans
 from sklearn.mixture import GaussianMixture
+from skimage.color import rgb2lab, lab2rgb
 from PIL import Image
+
+# ==============================
+# 🔧 FUNÇÕES UTILITÁRIAS
+# ==============================
 
 def preprocess_image_pil(pil_img, max_side=800):
     """Redimensiona mantendo proporção para acelerar processamento"""
@@ -17,7 +21,7 @@ def preprocess_image_pil(pil_img, max_side=800):
 
 
 def extract_pixels(pil_img, sample_size=30000, remove_transparent=True, remove_whites=True):
-    """Retorna array Nx3 em BGR (OpenCV) pronto para clustering"""
+    """Extrai pixels RGB da imagem e remove fundos brancos/pretos"""
     img = np.array(pil_img)
     if img.shape[-1] == 4 and remove_transparent:
         alpha = img[..., 3]
@@ -27,28 +31,29 @@ def extract_pixels(pil_img, sample_size=30000, remove_transparent=True, remove_w
         img = img.reshape(-1, img.shape[-1])
     if img.shape[-1] == 4:
         img = img[:, :3]
-    img_bgr = img[..., ::-1].astype(np.uint8)
+
+    img_rgb = img.astype(np.float32) / 255.0
 
     # Remover quase-brancos/quase-pretos
     if remove_whites:
-        lab = cv2.cvtColor(img_bgr.reshape(-1,1,3), cv2.COLOR_BGR2LAB).reshape(-1,3)
+        lab = rgb2lab(img_rgb.reshape(-1, 1, 3)).reshape(-1, 3)
         L = lab[:, 0]
-        mask_keep = (L > 5) & (L < 250)
-        img_bgr = img_bgr[mask_keep]
+        mask_keep = (L > 5) & (L < 95)
+        img_rgb = img_rgb[mask_keep]
 
     # Amostragem aleatória para velocidade
-    n_pixels = img_bgr.shape[0]
+    n_pixels = img_rgb.shape[0]
     if n_pixels > sample_size:
         idx = np.random.choice(n_pixels, sample_size, replace=False)
-        img_sample = img_bgr[idx]
+        img_sample = img_rgb[idx]
     else:
-        img_sample = img_bgr
+        img_sample = img_rgb
     return img_sample
 
 
-def cluster_colors(img_pixels_bgr, n_colors=6, use_mini_batch=True, n_init=10, use_gmm=False):
+def cluster_colors(img_pixels_rgb, n_colors=6, use_mini_batch=True, n_init=10, use_gmm=False):
     """Clusterização de cores no espaço LAB"""
-    lab = cv2.cvtColor(img_pixels_bgr.reshape(-1,1,3), cv2.COLOR_BGR2LAB).reshape(-1,3).astype(np.float32)
+    lab = rgb2lab(img_pixels_rgb.reshape(-1, 1, 3)).reshape(-1, 3)
 
     if use_gmm:
         gm = GaussianMixture(n_components=n_colors, covariance_type='tied', random_state=42)
@@ -63,26 +68,32 @@ def cluster_colors(img_pixels_bgr, n_colors=6, use_mini_batch=True, n_init=10, u
         labels = km.fit_predict(lab)
         centers_lab = km.cluster_centers_
 
-    centers_lab_uint8 = centers_lab.astype(np.uint8).reshape(-1,1,3)
-    centers_bgr = cv2.cvtColor(centers_lab_uint8, cv2.COLOR_LAB2BGR).reshape(-1,3)
-    centers_rgb = centers_bgr[..., ::-1]
+    centers_rgb = lab2rgb(centers_lab.reshape(-1, 1, 3)).reshape(-1, 3)
+    centers_rgb = np.clip(centers_rgb * 255, 0, 255).astype(int)
+
     unique, counts = np.unique(labels, return_counts=True)
     counts_full = np.zeros(n_colors, dtype=int)
     counts_full[unique] = counts
+
     order = np.argsort(-counts_full)
     centers_rgb = centers_rgb[order]
     counts_full = counts_full[order]
-    centers_rgb = np.clip(centers_rgb, 0, 255).astype(int)
+
     return centers_rgb, counts_full
 
 
 def rgb_to_hex(rgb):
     return "#{:02X}{:02X}{:02X}".format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
 
+
+# ==============================
+# 🖼️ INTERFACE STREAMLIT
+# ==============================
+
 st.set_page_config(page_title="🎨 ColorMind — Gerador de Paletas", page_icon="🎨", layout="wide")
 
 st.title("🎨 ColorMind — Gerador de Paletas Inteligente")
-st.write("Envie uma imagem e descubra as cores dominantes com precisão perceptual.")
+st.write("Envie uma imagem e descubra as cores dominantes com precisão perceptual (sem OpenCV).")
 
 uploaded_file = st.file_uploader("📸 Faça upload de uma imagem", type=["jpg", "jpeg", "png"])
 
